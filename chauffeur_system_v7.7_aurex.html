@@ -6497,6 +6497,7 @@ function initWithFirebase() {
           if (!localTime || fbTime > localTime) {
             // Firebase is newer — use it
             localStorage.setItem(STORAGE_KEY, fbData);
+            try { state = normalizeImportedState(fbState); } catch(e) {}
           } else if (localRaw) {
             // Local is newer — push to Firebase
             fetch(FB_URL, { method:'PUT', headers:{'Content-Type':'application/json'}, body:localRaw });
@@ -6512,6 +6513,7 @@ function initWithFirebase() {
           const localTime = localState?.meta?.lastSavedAt || '';
           if (!localTime || fbTime > localTime) {
             localStorage.setItem(STORAGE_KEY, fbStr);
+            try { state = normalizeImportedState(fbData); } catch(e) {}
           } else if (localRaw) {
             // Local is newer — push to Firebase so other devices get it
             fetch(FB_URL, { method:'PUT', headers:{'Content-Type':'application/json'}, body:localRaw });
