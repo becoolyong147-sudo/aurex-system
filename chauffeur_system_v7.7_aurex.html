@@ -673,9 +673,103 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
   .report-output { padding: 0; box-shadow: none; }
   body { background: white; }
 }
+
+/* ── PASSWORD GATE ── */
+#pw-gate {
+  position: fixed; inset: 0;
+  background: #0a0b0d;
+  z-index: 99999;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+#pw-gate .pw-logo {
+  font-size: 12px; letter-spacing: .25em; color: #c9a961;
+  text-transform: uppercase; margin-bottom: 6px;
+}
+#pw-gate .pw-brand {
+  font-size: 22px; font-weight: 300; color: #e8e9ed;
+  letter-spacing: .08em; margin-bottom: 36px;
+}
+#pw-gate .pw-box {
+  background: #111318; border: 1px solid #2a2e38;
+  border-radius: 14px; padding: 32px 28px;
+  width: min(360px, 90vw); text-align: center;
+}
+#pw-gate .pw-label {
+  font-size: 12px; color: #9aa0ad; margin-bottom: 16px;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+#pw-gate .pw-input {
+  width: 100%; padding: 13px 16px;
+  background: #1c2029; border: 1px solid #2a2e38;
+  border-radius: 8px; color: #e8e9ed;
+  font-size: 20px; letter-spacing: .2em;
+  text-align: center; outline: none;
+  font-family: inherit; margin-bottom: 14px;
+  transition: border-color .2s;
+}
+#pw-gate .pw-input:focus { border-color: #c9a961; }
+#pw-gate .pw-btn {
+  width: 100%; padding: 13px;
+  background: linear-gradient(180deg, #c9a961 0%, #8a7340 100%);
+  border: none; border-radius: 8px;
+  color: #0a0b0d; font-size: 14px; font-weight: 700;
+  cursor: pointer; letter-spacing: .05em;
+  font-family: inherit; transition: filter .15s;
+}
+#pw-gate .pw-btn:hover { filter: brightness(1.1); }
+#pw-gate .pw-err {
+  font-size: 12px; color: #ef4444;
+  margin-top: 12px; min-height: 18px;
+}
 </style>
 </head>
 <body>
+
+<!-- PASSWORD GATE -->
+<div id="pw-gate">
+  <div class="pw-logo">Aurex · Private Access</div>
+  <div class="pw-brand">Management System</div>
+  <div class="pw-box">
+    <div class="pw-label">Enter Password</div>
+    <input class="pw-input" id="pw-input" type="password"
+      placeholder="••••••••" maxlength="20"
+      onkeydown="if(event.key==='Enter')checkPw()">
+    <button class="pw-btn" onclick="checkPw()">ENTER</button>
+    <div class="pw-err" id="pw-err"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // Session unlock: once per browser session
+  if(sessionStorage.getItem('aurex_unlocked')==='1'){
+    document.getElementById('pw-gate').style.display='none';
+    return;
+  }
+  async function sha256(str){
+    const buf = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  // SHA-256 of the password (pre-computed)
+  const HASH='61dffdd4f6ff0b36f3e8f36cb702e28c104588576e223f18dc7c5554013d8e2c';
+  window.checkPw=async function(){
+    const v=document.getElementById('pw-input').value;
+    const h=await sha256(v);
+    if(h===HASH){
+      sessionStorage.setItem('aurex_unlocked','1');
+      document.getElementById('pw-gate').style.display='none';
+    } else {
+      const err=document.getElementById('pw-err');
+      err.textContent='Incorrect password. Please try again.';
+      document.getElementById('pw-input').value='';
+      document.getElementById('pw-input').focus();
+      setTimeout(()=>err.textContent='',3000);
+    }
+  };
+})();
+</script>
 
 <!-- =========================== TOP BAR =========================== -->
 <div class="topbar">
@@ -1310,6 +1404,9 @@ function saveState() {
 
     // Latest automatic backup
     localStorage.setItem(BACKUP_KEY, data);
+
+    // ── Firebase cloud sync (non-blocking) ──
+    firebaseSync(data);
 
     // Rolling backup history, kept inside the same browser.
     // This does not replace manual export; it protects against accidental overwrite or bad import.
@@ -6322,9 +6419,113 @@ function init() {
   checkManualBackupReminder();
 }
 
-document.addEventListener('DOMContentLoaded', init);
-// In case script runs after DOMContentLoaded
-if (document.readyState !== 'loading') init();
+// ════════════════════════════════════════════
+//  FIREBASE REALTIME DATABASE SYNC
+//  Uses REST API — no SDK required
+// ════════════════════════════════════════════
+const FB_URL = 'https://aurex-ride-system-default-rtdb.firebaseio.com/chauffeur.json';
+let fbSyncTimer = null;
+let fbSyncIndicator = null;
+
+function firebaseSync(data) {
+  // Debounce: wait 2s after last save before pushing to Firebase
+  clearTimeout(fbSyncTimer);
+  fbSyncTimer = setTimeout(() => {
+    setFbIndicator('syncing');
+    fetch(FB_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: data
+    })
+    .then(r => { if(r.ok) setFbIndicator('ok'); else setFbIndicator('err'); })
+    .catch(() => setFbIndicator('err'));
+  }, 2000);
+}
+
+function setFbIndicator(status) {
+  if (!fbSyncIndicator) {
+    fbSyncIndicator = document.createElement('div');
+    fbSyncIndicator.id = 'fb-sync';
+    fbSyncIndicator.style.cssText =
+      'position:fixed;bottom:16px;right:16px;z-index:9000;' +
+      'padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600;' +
+      'letter-spacing:.05em;pointer-events:none;transition:opacity .4s;' +
+      'font-family:-apple-system,sans-serif;';
+    document.body.appendChild(fbSyncIndicator);
+  }
+  fbSyncIndicator.style.opacity = '1';
+  if (status === 'syncing') {
+    fbSyncIndicator.textContent = '⟳ Syncing…';
+    fbSyncIndicator.style.background = '#1c2029';
+    fbSyncIndicator.style.color = '#c9a961';
+    fbSyncIndicator.style.border = '1px solid #c9a961';
+  } else if (status === 'ok') {
+    fbSyncIndicator.textContent = '✓ Synced';
+    fbSyncIndicator.style.background = '#0d2318';
+    fbSyncIndicator.style.color = '#4ade80';
+    fbSyncIndicator.style.border = '1px solid #4ade80';
+    setTimeout(() => { fbSyncIndicator.style.opacity = '0'; }, 3000);
+  } else {
+    fbSyncIndicator.textContent = '✕ Sync failed';
+    fbSyncIndicator.style.background = '#2a0d0d';
+    fbSyncIndicator.style.color = '#ef4444';
+    fbSyncIndicator.style.border = '1px solid #ef4444';
+    setTimeout(() => { fbSyncIndicator.style.opacity = '0'; }, 5000);
+  }
+}
+
+function initWithFirebase() {
+  document.getElementById('currentDateLabel').textContent =
+    new Date().toLocaleDateString('en-GB', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
+
+  setFbIndicator('syncing');
+
+  // Try loading from Firebase first (cloud takes priority)
+  fetch(FB_URL)
+    .then(r => r.json())
+    .then(fbData => {
+      if (fbData && typeof fbData === 'string') {
+        // Firebase has data — check if it's newer than local
+        try {
+          const fbState = JSON.parse(fbData);
+          const localRaw = localStorage.getItem(STORAGE_KEY);
+          const localState = localRaw ? JSON.parse(localRaw) : null;
+
+          const fbTime = fbState?.meta?.lastSavedAt || '';
+          const localTime = localState?.meta?.lastSavedAt || '';
+
+          if (!localTime || fbTime > localTime) {
+            // Firebase is newer — use it
+            localStorage.setItem(STORAGE_KEY, fbData);
+          }
+        } catch(e) {}
+      } else if (fbData && typeof fbData === 'object' && Object.keys(fbData).length > 0) {
+        // Firebase returned an object directly
+        try {
+          const fbStr = JSON.stringify(fbData);
+          const localRaw = localStorage.getItem(STORAGE_KEY);
+          const localState = localRaw ? JSON.parse(localRaw) : null;
+          const fbTime = fbData?.meta?.lastSavedAt || '';
+          const localTime = localState?.meta?.lastSavedAt || '';
+          if (!localTime || fbTime > localTime) {
+            localStorage.setItem(STORAGE_KEY, fbStr);
+          }
+        } catch(e) {}
+      }
+      setFbIndicator('ok');
+    })
+    .catch(() => {
+      setFbIndicator('err');
+    })
+    .finally(() => {
+      migrateData();
+      renderAll();
+      checkManualBackupReminder();
+    });
+}
+
+document.addEventListener('DOMContentLoaded', initWithFirebase);
+if (document.readyState !== 'loading') initWithFirebase();
 </script>
 
 <!-- ═══ MOBILE ENHANCEMENTS ═══ -->
