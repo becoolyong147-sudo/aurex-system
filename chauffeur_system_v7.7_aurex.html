@@ -6497,6 +6497,9 @@ function initWithFirebase() {
           if (!localTime || fbTime > localTime) {
             // Firebase is newer — use it
             localStorage.setItem(STORAGE_KEY, fbData);
+          } else if (localRaw) {
+            // Local is newer — push to Firebase
+            fetch(FB_URL, { method:'PUT', headers:{'Content-Type':'application/json'}, body:localRaw });
           }
         } catch(e) {}
       } else if (fbData && typeof fbData === 'object' && Object.keys(fbData).length > 0) {
@@ -6509,8 +6512,17 @@ function initWithFirebase() {
           const localTime = localState?.meta?.lastSavedAt || '';
           if (!localTime || fbTime > localTime) {
             localStorage.setItem(STORAGE_KEY, fbStr);
+          } else if (localRaw) {
+            // Local is newer — push to Firebase so other devices get it
+            fetch(FB_URL, { method:'PUT', headers:{'Content-Type':'application/json'}, body:localRaw });
           }
         } catch(e) {}
+      } else {
+        // Firebase is empty — push local data up so other devices can sync
+        const localRaw = localStorage.getItem(STORAGE_KEY);
+        if (localRaw) {
+          fetch(FB_URL, { method:'PUT', headers:{'Content-Type':'application/json'}, body:localRaw });
+        }
       }
       setFbIndicator('ok');
     })
